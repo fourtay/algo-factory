@@ -1,72 +1,59 @@
 name: Strategy Factory – Generate One
 
 on:
-  workflow_dispatch:            # manual button in Actions tab
+  # Press “Run workflow” in the Actions tab any time
+  workflow_dispatch:
+
+  # Optional: run automatically every day at 06:00 UTC
   schedule:
-    - cron: '0 6 * * *'         # optional: runs daily at 06:00 UTC
+    - cron: '0 6 * * *'
 
 jobs:
   generate:
     runs-on: ubuntu-latest
 
     steps:
-    ##################################
-    # Pull the repository code
-    ##################################
+    # 1 ▸ get your repo code onto the runner
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    ##################################
-    # Install Python 3.11
-    ##################################
+    # 2 ▸ install Python 3.11
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
-    ##################################
-    # Install all Python libraries
-    ##################################
+    # 3 ▸ install all required libraries
     - name: Install libraries
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    ##################################
-    # Call GPT to create candidate algos
-    ##################################
+    # 4 ▸ call GPT to create strategy folders
     - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
         python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    ##################################
-    # Run Ruff linter (the word 'check' is required!)
-    ##################################
+    # 5 ▸ lint with Ruff (ignore Lean-style wildcard import warnings)
     - name: Ruff lint
       run: |
-        ruff check factory/candidates
+        ruff check --ignore F403,F405,F841 factory/candidates
 
-    ##################################
-    # Custom AST checker to block look-ahead bias
-    ##################################
+    # 6 ▸ custom AST check for look-ahead bias
     - name: AST future-data check
       run: |
         for f in factory/candidates/ALG_*/main.py; do
           python factory/scripts/check_ast.py "$f"
         done
 
-    ##################################
-    # Pytest: can we import the algos?
-    ##################################
+    # 7 ▸ pytest: can each file import?
     - name: Pytest import check
       run: |
         pytest -q
 
-    ##################################
-    # Zip and upload the survivors
-    ##################################
+    # 8 ▸ zip & upload only if every step above succeeded
     - name: Upload surviving candidates
       if: success()
       uses: actions/upload-artifact@v4
