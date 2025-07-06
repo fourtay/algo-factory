@@ -1,37 +1,40 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:               # manual button
+  # Press “Run workflow” in the Actions tab to launch a run
+  workflow_dispatch:
+
+  # (Optional) run automatically each day at 06:00 UTC
   schedule:
-    - cron: '0 6 * * *'            # OPTIONAL daily run
+    - cron: '0 6 * * *'
 
 jobs:
   factory:
     runs-on: ubuntu-latest
-    timeout-minutes: 60            # hard cap
+    timeout-minutes: 60          # hard cap so a run can’t hang forever
 
     steps:
     ######################################################################
-    # 1 ▸ checkout repo
+    # 1 ▸ pull your repo
     ######################################################################
     - name: Checkout repo
       uses: actions/checkout@v4
 
     ######################################################################
-    # 2 ▸ set up Python 3.11 + dependencies
+    # 2 ▸ install Python 3.11 and libraries
     ######################################################################
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
-    - name: Install libraries
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     ######################################################################
-    # 3 ▸ generate strategies with GPT
+    # 3 ▸ GPT generates candidate strategies
     ######################################################################
     - name: Generate candidates
       env:
@@ -40,7 +43,7 @@ jobs:
         python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
     ######################################################################
-    # 4 ▸ static gate
+    # 4 ▸ Static gate (lint → AST → pytest)
     ######################################################################
     - name: Ruff lint
       run: |
@@ -57,12 +60,12 @@ jobs:
         pytest -q tests
 
     ######################################################################
-    # 5 ▸ back-test every survivor with Lean Docker
+    # 5 ▸ Back-test survivors with Lean Docker (foundation image ~5 GB)
     ######################################################################
     - name: Run Lean back-tests
       if: success()
       env:
-        LEAN_DOCKER_IMAGE: quantconnect/lean:latest
+        LEAN_DOCKER_IMAGE: quantconnect/lean:foundation
       run: |
         mkdir backtest_reports
         for dir in factory/candidates/ALG_*; do
@@ -77,8 +80,15 @@ jobs:
         done
 
     ######################################################################
-    # 6 ▸ upload JSON results
+    # 6 ▸ Upload results for download
     ######################################################################
+    - name: Upload cleaned candidates
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: candidates_clean
+        path: factory/candidates
+
     - name: Upload back-test reports
       if: success()
       uses: actions/upload-artifact@v4
