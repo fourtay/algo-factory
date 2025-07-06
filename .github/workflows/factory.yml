@@ -1,34 +1,31 @@
-name: Strategy Factory – Generate One
-
-on:
-  workflow_dispatch:        # lets you press a button to run it
-
-jobs:
-  generate:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-
     - name: Install libraries
       run: |
         python -m pip install --upgrade pip
-        pip install openai tiktoken
+        pip install -r requirements.txt
 
-    - name: Run generator script
+    - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
-        python factory/scripts/generate_algo.py \
-               --task "simple RSI strategy"
+        python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    - name: Upload results
+    - name: Ruff lint
+      run: |
+        ruff factory/candidates || (echo "Lint failed" && exit 1)
+
+    - name: AST future-data check
+      run: |
+        for f in factory/candidates/ALG_*/main.py; do
+          python factory/scripts/check_ast.py "$f"
+        done
+
+    - name: Pytest import check
+      run: |
+        pytest -q
+
+    - name: Upload surviving candidates
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: candidates
+        name: candidates_clean
         path: factory/candidates
