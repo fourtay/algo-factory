@@ -10,7 +10,7 @@ def call_gpt(task: str):
         {"role": "user",   "content": user_part.replace("{strategy_desc}", task)},
     ]
     response = openai.chat.completions.create(
-        model="o3",
+        model="gpt-4o",
         messages=messages,
         response_format={"type": "json_object"},
         max_tokens=600,
