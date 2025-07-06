@@ -1,48 +1,72 @@
 name: Strategy Factory – Generate One
 
 on:
-  workflow_dispatch:            # click-to-run button in Actions tab
+  workflow_dispatch:            # manual button in Actions tab
   schedule:
-    - cron: '0 6 * * *'         # optional daily run at 06:00 UTC
+    - cron: '0 6 * * *'         # optional: runs daily at 06:00 UTC
 
 jobs:
   generate:
     runs-on: ubuntu-latest
 
     steps:
+    ##################################
+    # Pull the repository code
+    ##################################
     - name: Checkout repo
       uses: actions/checkout@v4
 
+    ##################################
+    # Install Python 3.11
+    ##################################
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
+    ##################################
+    # Install all Python libraries
+    ##################################
     - name: Install libraries
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    ##################################
+    # Call GPT to create candidate algos
+    ##################################
     - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
         python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
+    ##################################
+    # Run Ruff linter (the word 'check' is required!)
+    ##################################
     - name: Ruff lint
       run: |
-        ruff factory/candidates
+        ruff check factory/candidates
 
+    ##################################
+    # Custom AST checker to block look-ahead bias
+    ##################################
     - name: AST future-data check
       run: |
         for f in factory/candidates/ALG_*/main.py; do
           python factory/scripts/check_ast.py "$f"
         done
 
+    ##################################
+    # Pytest: can we import the algos?
+    ##################################
     - name: Pytest import check
       run: |
         pytest -q
 
+    ##################################
+    # Zip and upload the survivors
+    ##################################
     - name: Upload surviving candidates
       if: success()
       uses: actions/upload-artifact@v4
