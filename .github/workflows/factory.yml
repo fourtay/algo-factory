@@ -1,59 +1,87 @@
-name: Strategy Factory – Generate One
+name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:            # manual button in Actions tab
+  workflow_dispatch:               # manual button
   schedule:
-    - cron: '0 6 * * *'         # optional: daily at 06:00 UTC
+    - cron: '0 6 * * *'            # OPTIONAL daily run
 
 jobs:
-  generate:
+  factory:
     runs-on: ubuntu-latest
+    timeout-minutes: 60            # hard cap
 
     steps:
-    # 1 ▸ pull repo
+    ######################################################################
+    # 1 ▸ checkout repo
+    ######################################################################
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # 2 ▸ Python
+    ######################################################################
+    # 2 ▸ set up Python 3.11 + dependencies
+    ######################################################################
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
-    # 3 ▸ dependencies
     - name: Install libraries
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 4 ▸ GPT makes candidates
+    ######################################################################
+    # 3 ▸ generate strategies with GPT
+    ######################################################################
     - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
         python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    # 5 ▸ Ruff lint (ignore common Lean warnings)
+    ######################################################################
+    # 4 ▸ static gate
+    ######################################################################
     - name: Ruff lint
       run: |
         ruff check --ignore F403,F405,F841 factory/candidates
 
-    # 6 ▸ AST look-ahead guard
     - name: AST future-data check
       run: |
         for f in factory/candidates/ALG_*/main.py; do
           python factory/scripts/check_ast.py "$f"
         done
 
-    # 7 ▸ Import test (ONLY root tests folder)
     - name: Pytest import check
       run: |
-        pytest -q tests        # <-- limits discovery to one directory
+        pytest -q tests
 
-    # 8 ▸ Upload survivors
-    - name: Upload surviving candidates
+    ######################################################################
+    # 5 ▸ back-test every survivor with Lean Docker
+    ######################################################################
+    - name: Run Lean back-tests
+      if: success()
+      env:
+        LEAN_DOCKER_IMAGE: quantconnect/lean:latest
+      run: |
+        mkdir backtest_reports
+        for dir in factory/candidates/ALG_*; do
+          echo "── Back-testing $dir ──"
+          docker run --rm \
+            -v ${{ github.workspace }}:/Lean/Launcher \
+            -w /Lean/Launcher/$dir \
+            ${LEAN_DOCKER_IMAGE} \
+            lean backtest "$dir" \
+              --start 2021-01-01 --end 2023-12-31 \
+              --output ../../../backtest_reports/$(basename $dir).json
+        done
+
+    ######################################################################
+    # 6 ▸ upload JSON results
+    ######################################################################
+    - name: Upload back-test reports
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: candidates_clean
-        path: factory/candidates
+        name: backtest_reports
+        path: backtest_reports
