@@ -1,39 +1,47 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:          # run manually from the Actions tab
   schedule:
-    - cron: '0 6 * * *'   # optional daily run
+    - cron: '0 6 * * *'       # optional: run every day at 06 UTC
 
 jobs:
   factory:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 60       # safety cap
 
     steps:
-    # 1 ▸ checkout
+    ##################################################################
+    # 1 ▸ checkout the repo
+    ##################################################################
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # 2 ▸ Python deps
+    ##################################################################
+    # 2 ▸ set up Python and install deps
+    ##################################################################
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
-    - name: Install deps
+    - name: Install requirements
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 3 ▸ GPT generation
+    ##################################################################
+    # 3 ▸ GPT generates candidate Lean strategies
+    ##################################################################
     - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
         python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    # 4 ▸ Static gate
+    ##################################################################
+    # 4 ▸ static gate: lint → AST → pytest
+    ##################################################################
     - name: Ruff lint
       run: |
         ruff check --ignore F403,F405,F841 factory/candidates
@@ -48,11 +56,16 @@ jobs:
       run: |
         pytest -q tests
 
-    # 5 ▸ Make room, then pull the small image
+    ##################################################################
+    # 5 ▸ free disk, then pull the SMALL Lean image
+    ##################################################################
     - name: Prune docker space
       run: |
         docker system prune -af
 
+    ##################################################################
+    # 6 ▸ run Lean back-tests inside the container
+    ##################################################################
     - name: Run Lean back-tests (python image ≈3 GB)
       if: success()
       env:
@@ -70,7 +83,9 @@ jobs:
               --output ../../../backtest_reports/$(basename $dir).json
         done
 
-    # 6 ▸ Upload artifacts
+    ##################################################################
+    # 7 ▸ upload artifacts for download
+    ##################################################################
     - name: Upload cleaned candidates
       if: success()
       uses: actions/upload-artifact@v4
