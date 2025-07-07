@@ -1,47 +1,39 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:           # manual “Run workflow” button
+  workflow_dispatch:          # manual button
   schedule:
-    - cron: '0 6 * * *'        # optional daily run 06-00 UTC
+    - cron: '0 6 * * *'       # optional daily run
 
 jobs:
   factory:
     runs-on: ubuntu-latest
-    timeout-minutes: 60        # stop runaway jobs
+    timeout-minutes: 60
 
     steps:
-      # ─────────────────────────────────────────
-      # 1 ▸ repo checkout
-      # ─────────────────────────────────────────
+      # 1 ▸ checkout
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────
-      # 2 ▸ Python 3.11 + pip deps
-      # ─────────────────────────────────────────
+      # 2 ▸ Python 3.11 + deps
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install Python requirements
+      - name: Install requirements & Lean-CLI
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install --upgrade lean            # Lean-CLI
+          python -m pip install -r requirements.txt
+          python -m pip install --upgrade lean
 
-      # ─────────────────────────────────────────
-      # 3 ▸ GPT creates candidate strategies
-      # ─────────────────────────────────────────
+      # 3 ▸ GPT generates candidates
       - name: Generate candidates
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-      # ─────────────────────────────────────────
-      # 4 ▸ Static gate (Ruff → AST → Pytest)
-      # ─────────────────────────────────────────
+      # 4 ▸ static gate
       - name: Ruff lint
         run: ruff check --ignore F403,F405,F841 factory/candidates
 
@@ -54,33 +46,27 @@ jobs:
       - name: Pytest import check
         run: pytest -q tests
 
-      # ─────────────────────────────────────────
-      # 5 ▸ Free disk, prune Docker cache
-      # ─────────────────────────────────────────
+      # 5 ▸ free space but KEEP /opt/hostedtoolcache (holds Python + lean)
       - name: Free runner disk
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android
           sudo docker system prune -af
 
-      # ─────────────────────────────────────────
-      # 6 ▸ Back-test each survivor via Lean-CLI
-      # ─────────────────────────────────────────
+      # 6 ▸ back-test every survivor via Lean-CLI
       - name: Run Lean back-tests
         if: success()
         run: |
           mkdir -p backtest_reports
           for dir in factory/candidates/ALG_*; do
             echo "── Back-testing $(basename "$dir") ──"
-            lean backtest "$dir" \
+            python -m lean backtest "$dir" \
               --detach \
               --engine-image quantconnect/lean:latest \
               --start 2021-01-01 --end 2023-12-31 \
               --output-dir backtest_reports/$(basename "$dir")
           done
 
-      # ─────────────────────────────────────────
-      # 7 ▸ Upload artifacts
-      # ─────────────────────────────────────────
+      # 7 ▸ upload artifacts
       - name: Upload cleaned candidates
         if: success()
         uses: actions/upload-artifact@v4
