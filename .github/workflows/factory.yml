@@ -1,9 +1,9 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:          # manual button in Actions tab
   schedule:
-    - cron: '0 6 * * *'        # optional daily run
+    - cron: '0 6 * * *'       # optional daily run at 06:00 UTC
 
 jobs:
   factory:
@@ -11,15 +11,15 @@ jobs:
     timeout-minutes: 60
 
     steps:
-    ###################################################################
+    #################################################################
     # 1 ▸ Checkout repo
-    ###################################################################
+    #################################################################
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    ###################################################################
+    #################################################################
     # 2 ▸ Python 3.11 + requirements
-    ###################################################################
+    #################################################################
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -30,17 +30,17 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    ###################################################################
+    #################################################################
     # 3 ▸ GPT generates candidate strategies
-    ###################################################################
+    #################################################################
     - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    ###################################################################
-    # 4 ▸ Static gate (Ruff → AST → Pytest)
-    ###################################################################
+    #################################################################
+    # 4 ▸ Static gate  (Ruff → AST → Pytest)
+    #################################################################
     - name: Ruff lint
       run: ruff check --ignore F403,F405,F841 factory/candidates
 
@@ -53,42 +53,43 @@ jobs:
     - name: Pytest import check
       run: pytest -q tests
 
-    ###################################################################
-    # 5 ▸ FREE DISK SPACE (remove big pre-installed SDKs & caches)
-    ###################################################################
-    - name: Free runner disk space
+    #################################################################
+    # 5 ▸ Free disk space, then prune Docker cache
+    #################################################################
+    - name: Free runner disk
       run: |
-        sudo rm -rf \
-          /usr/share/dotnet \
-          /usr/share/swift \
-          /opt/ghc \
-          /opt/hostedtoolcache \
-          /usr/local/lib/android
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
         sudo docker system prune -af
 
-    ###################################################################
-    # 6 ▸ Back-test in the official foundation image
-    ###################################################################
+    #################################################################
+    # 6 ▸ Back-test each survivor with the Lean engine
+    #################################################################
     - name: Run Lean back-tests (foundation image)
       if: success()
       env:
-        LEAN_DOCKER_IMAGE: quantconnect/lean:foundation
+        LEAN_IMAGE: quantconnect/lean:foundation           # <— official CPU image
       run: |
-        mkdir backtest_reports
+        mkdir -p backtest_reports
+        # Loop over each generated strategy folder
         for dir in factory/candidates/ALG_*; do
-          echo "── Back-testing $dir ──"
+          STRAT=$(basename "$dir")
+          echo "── Back-testing $STRAT ──"
+
           docker run --rm \
-            -v ${{ github.workspace }}:/Lean/Launcher \
-            -w /Lean/Launcher/$dir \
-            ${LEAN_DOCKER_IMAGE} \
-            lean backtest "$dir" \
-              --start 2021-01-01 --end 2023-12-31 \
-              --output ../../../backtest_reports/$(basename $dir).json
+            -v "${{ github.workspace }}/$dir":/Lean/Launcher \
+            ${LEAN_IMAGE} \
+            dotnet /Lean/Launcher/QuantConnect.Lean.Launcher.dll \
+              --data-folder /Lean/Data \
+              --algorithm-type-name main \
+              --algorithm-location /Lean/Launcher/main.py \
+              --start-date 2021-01-01 \
+              --end-date   2023-12-31 \
+              --results-destination /Lean/Launcher/../../backtest_reports
         done
 
-    ###################################################################
+    #################################################################
     # 7 ▸ Upload artifacts
-    ###################################################################
+    #################################################################
     - name: Upload cleaned candidates
       if: success()
       uses: actions/upload-artifact@v4
