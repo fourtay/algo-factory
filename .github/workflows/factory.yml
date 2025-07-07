@@ -3,7 +3,7 @@ name: Strategy Factory – Generate & Back-test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'       # optional daily run at 06:00 UTC
+    - cron: '0 6 * * *'        # optional daily run
 
 jobs:
   factory:
@@ -11,11 +11,11 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # 1 ▸ clone the repo
+      # 1 ▸ clone repo
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2 ▸ Python 3.11 + Lean-CLI
+      # 2 ▸ Python 3.11  + Lean-CLI
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -25,16 +25,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install --upgrade lean         # CLI wrapper "lean"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"    # ensure wrapper on PATH
+          python -m pip install --upgrade lean
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"   # put lean wrapper on PATH
 
-      # 3 ▸ use GPT to generate candidate algos
+      # 3 ▸ GPT makes candidate algos
       - name: Generate candidates
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-      # 4 ▸ static quality gate
+      # 4 ▸ static checks
       - name: Ruff lint
         run: ruff check --ignore F403,F405,F841 factory/candidates
 
@@ -47,13 +47,13 @@ jobs:
       - name: Pytest import check
         run: pytest -q tests
 
-      # 5 ▸ free disk before pulling Docker image
+      # 5 ▸ free disk
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
           sudo docker system prune -af
 
-      # 6 ▸ back-test every survivor via Lean-CLI
+      # 6 ▸ back-test via Lean-CLI
       - name: Run Lean back-tests
         if: success()
         run: |
@@ -63,7 +63,7 @@ jobs:
             lean backtest "$dir" \
               --detach \
               --image quantconnect/lean:latest \
-              --output-dir backtest_reports/$(basename "$dir")
+              --output backtest_reports/$(basename "$dir")
           done
 
       # 7 ▸ upload artifacts
