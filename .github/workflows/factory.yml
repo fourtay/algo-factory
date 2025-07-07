@@ -1,78 +1,96 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:           # manual “Run workflow” button
   schedule:
-    - cron: '0 6 * * *'   # optional daily run
+    - cron: '0 6 * * *'        # optional daily run 06-00 UTC
 
 jobs:
   factory:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 60        # stop runaway jobs
 
     steps:
-    # 1 ▸ checkout
-    - uses: actions/checkout@v4
-      name: Checkout repo
+      # ─────────────────────────────────────────
+      # 1 ▸ repo checkout
+      # ─────────────────────────────────────────
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    # 2 ▸ Python 3.11
-    - uses: actions/setup-python@v4
-      name: Set up Python
-      with: { python-version: '3.11' }
+      # ─────────────────────────────────────────
+      # 2 ▸ Python 3.11 + pip deps
+      # ─────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Install requirements
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install --upgrade lean                 # ← new: install Lean CLI
+      - name: Install Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install --upgrade lean            # Lean-CLI
 
-    # 3 ▸ GPT generation
-    - name: Generate candidates
-      env: { OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} }
-      run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
+      # ─────────────────────────────────────────
+      # 3 ▸ GPT creates candidate strategies
+      # ─────────────────────────────────────────
+      - name: Generate candidates
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    # 4 ▸ static gate
-    - name: Ruff lint
-      run: ruff check --ignore F403,F405,F841 factory/candidates
+      # ─────────────────────────────────────────
+      # 4 ▸ Static gate (Ruff → AST → Pytest)
+      # ─────────────────────────────────────────
+      - name: Ruff lint
+        run: ruff check --ignore F403,F405,F841 factory/candidates
 
-    - name: AST future-data check
-      run: |
-        for f in factory/candidates/ALG_*/main.py; do
-          python factory/scripts/check_ast.py "$f"
-        done
+      - name: AST future-data check
+        run: |
+          for f in factory/candidates/ALG_*/main.py; do
+            python factory/scripts/check_ast.py "$f"
+          done
 
-    - name: Pytest import check
-      run: pytest -q tests
+      - name: Pytest import check
+        run: pytest -q tests
 
-    # 5 ▸ free disk for Docker image (optional but safe)
-    - name: Free runner disk
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
-        sudo docker system prune -af
+      # ─────────────────────────────────────────
+      # 5 ▸ Free disk, prune Docker cache
+      # ─────────────────────────────────────────
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
+          sudo docker system prune -af
 
-    # 6 ▸ back-test each survivor via Lean CLI
-    - name: Run Lean back-tests
-      if: success()
-      run: |
-        mkdir backtest_reports
-        for dir in factory/candidates/ALG_*; do
-          echo "── Back-testing $(basename $dir) ──"
-          lean backtest "$dir" \
-            --detach \
-            --engine-image quantconnect/lean:latest \
-            --start 2021-01-01 --end 2023-12-31 \
-            --output-dir backtest_reports/$(basename $dir)
-        done
+      # ─────────────────────────────────────────
+      # 6 ▸ Back-test each survivor via Lean-CLI
+      # ─────────────────────────────────────────
+      - name: Run Lean back-tests
+        if: success()
+        run: |
+          mkdir -p backtest_reports
+          for dir in factory/candidates/ALG_*; do
+            echo "── Back-testing $(basename "$dir") ──"
+            lean backtest "$dir" \
+              --detach \
+              --engine-image quantconnect/lean:latest \
+              --start 2021-01-01 --end 2023-12-31 \
+              --output-dir backtest_reports/$(basename "$dir")
+          done
 
-    # 7 ▸ upload artifacts
-    - uses: actions/upload-artifact@v4
-      if: success()
-      with:
-        name: candidates_clean
-        path: factory/candidates
+      # ─────────────────────────────────────────
+      # 7 ▸ Upload artifacts
+      # ─────────────────────────────────────────
+      - name: Upload cleaned candidates
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidates_clean
+          path: factory/candidates
 
-    - uses: actions/upload-artifact@v4
-      if: success()
-      with:
-        name: backtest_reports
-        path: backtest_reports
+      - name: Upload back-test reports
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest_reports
+          path: backtest_reports
