@@ -3,7 +3,7 @@ name: Strategy Factory – Generate & Back-test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'          # optional daily run
+    - cron: '0 6 * * *'
 
 jobs:
   factory:
@@ -12,22 +12,24 @@ jobs:
 
     steps:
       # 1 ▸ repo
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        name: Checkout repo
 
-      # 2 ▸ Python 3.11 + deps
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      # 2 ▸ Python 3.11
+      - uses: actions/setup-python@v4
+        name: Set up Python
         with:
           python-version: '3.11'
 
-      - name: Install requirements (+ Lean-CLI)
+      - name: Install requirements + Lean-CLI
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install --upgrade lean        # CLI goes into tool-cache
+          python -m pip install --upgrade lean
+          # ensure ~/.local/bin (user-base scripts) is on PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # 3 ▸ GPT generates candidates
+      # 3 ▸ GPT generation
       - name: Generate candidates
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -46,20 +48,20 @@ jobs:
       - name: Pytest import check
         run: pytest -q tests
 
-      # 5 ▸ free some disk (leave tool-cache intact!)
+      # 5 ▸ free some disk (keep tool-cache!)
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
           sudo docker system prune -af
 
-      # 6 ▸ back-test every survivor via Lean-CLI
+      # 6 ▸ back-test via Lean-CLI
       - name: Run Lean back-tests
         if: success()
         run: |
           mkdir -p backtest_reports
           for dir in factory/candidates/ALG_*; do
             echo "── Back-testing $(basename "$dir") ──"
-            python -m lean backtest "$dir" \
+            lean backtest "$dir" \
               --detach \
               --engine-image quantconnect/lean:latest \
               --start 2021-01-01 --end 2023-12-31 \
