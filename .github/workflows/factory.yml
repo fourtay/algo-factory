@@ -1,50 +1,36 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:          # run manually from the Actions tab
+  workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'       # optional: run every day at 06 UTC
+    - cron: '0 6 * * *'       # optional daily run
 
 jobs:
   factory:
     runs-on: ubuntu-latest
-    timeout-minutes: 60       # safety cap
+    timeout-minutes: 60
 
     steps:
-    ##################################################################
-    # 1 ▸ checkout the repo
-    ##################################################################
-    - name: Checkout repo
-      uses: actions/checkout@v4
+    # 1 ▸ Checkout repo
+    - uses: actions/checkout@v4
 
-    ##################################################################
-    # 2 ▸ set up Python and install deps
-    ##################################################################
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+    # 2 ▸ Python + deps
+    - uses: actions/setup-python@v4
+      with: {python-version: '3.11'}
 
     - name: Install requirements
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    ##################################################################
-    # 3 ▸ GPT generates candidate Lean strategies
-    ##################################################################
+    # 3 ▸ GPT generation
     - name: Generate candidates
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: |
-        python factory/scripts/generate_algo.py --task "simple RSI strategy"
+      env: {OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}}
+      run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    ##################################################################
-    # 4 ▸ static gate: lint → AST → pytest
-    ##################################################################
+    # 4 ▸ Static gate
     - name: Ruff lint
-      run: |
-        ruff check --ignore F403,F405,F841 factory/candidates
+      run: ruff check --ignore F403,F405,F841 factory/candidates
 
     - name: AST future-data check
       run: |
@@ -53,23 +39,16 @@ jobs:
         done
 
     - name: Pytest import check
-      run: |
-        pytest -q tests
+      run: pytest -q tests
 
-    ##################################################################
-    # 5 ▸ free disk, then pull the SMALL Lean image
-    ##################################################################
-    - name: Prune docker space
-      run: |
-        docker system prune -af
+    # 5 ▸ Free disk, then pull ***foundation-python*** image
+    - name: Prune docker cache
+      run: docker system prune -af
 
-    ##################################################################
-    # 6 ▸ run Lean back-tests inside the container
-    ##################################################################
-    - name: Run Lean back-tests (python image ≈3 GB)
+    - name: Run Lean back-tests (foundation-python ≈3 GB)
       if: success()
       env:
-        LEAN_DOCKER_IMAGE: quantconnect/lean:python
+        LEAN_DOCKER_IMAGE: quantconnect/lean:foundation-python
       run: |
         mkdir backtest_reports
         for dir in factory/candidates/ALG_*; do
@@ -83,19 +62,15 @@ jobs:
               --output ../../../backtest_reports/$(basename $dir).json
         done
 
-    ##################################################################
-    # 7 ▸ upload artifacts for download
-    ##################################################################
-    - name: Upload cleaned candidates
+    # 6 ▸ Upload artifacts
+    - uses: actions/upload-artifact@v4
       if: success()
-      uses: actions/upload-artifact@v4
       with:
         name: candidates_clean
         path: factory/candidates
 
-    - name: Upload back-test reports
+    - uses: actions/upload-artifact@v4
       if: success()
-      uses: actions/upload-artifact@v4
       with:
         name: backtest_reports
         path: backtest_reports
