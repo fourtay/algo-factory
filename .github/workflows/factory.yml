@@ -11,11 +11,11 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # 1 ▸ clone repo
+      # 1 ▸ checkout
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2 ▸ Python 3.11  + Lean-CLI
+      # 2 ▸ Python 3.11 + Lean-CLI
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -26,15 +26,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install --upgrade lean
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"   # put lean wrapper on PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"   # add lean wrapper to PATH
 
-      # 3 ▸ GPT makes candidate algos
+      # 3 ▸ generate candidate algos
       - name: Generate candidates
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-      # 4 ▸ static checks
+      # 4 ▸ static gate
       - name: Ruff lint
         run: ruff check --ignore F403,F405,F841 factory/candidates
 
@@ -47,13 +47,18 @@ jobs:
       - name: Pytest import check
         run: pytest -q tests
 
-      # 5 ▸ free disk
+      # 5 ▸ free some disk
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
           sudo docker system prune -af
 
-      # 6 ▸ back-test via Lean-CLI
+      # 6 ▸ create non-interactive Lean config
+      - name: Prepare Lean config (CI)
+        run: |
+          lean init --ci --no-login     # makes lean.json in repo root
+
+      # 7 ▸ back-test each survivor
       - name: Run Lean back-tests
         if: success()
         run: |
@@ -66,7 +71,7 @@ jobs:
               --output backtest_reports/$(basename "$dir")
           done
 
-      # 7 ▸ upload artifacts
+      # 8 ▸ upload artifacts
       - name: Upload cleaned candidates
         if: success()
         uses: actions/upload-artifact@v4
