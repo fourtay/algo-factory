@@ -3,7 +3,7 @@ name: Strategy Factory – Generate & Back-test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'        # optional daily run
+    - cron: '0 6 * * *'      # optional daily run
 
 jobs:
   factory:
@@ -11,11 +11,11 @@ jobs:
     timeout-minutes: 60
 
     steps:
-    # 1 ▸ check out the repo
+    # 1 ▸ checkout
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # 2 ▸ Python 3.11 + dependencies
+    # 2 ▸ Python 3.11 & deps
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -26,14 +26,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 3 ▸ generate candidate algos with GPT
+    # 3 ▸ GPT generates candidate strategies
     - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: |
-        python factory/scripts/generate_algo.py --task "simple RSI strategy"
+      run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    # 4 ▸ static gate: Ruff → AST → Pytest
+    # 4 ▸ static gate
     - name: Ruff lint
       run: ruff check --ignore F403,F405,F841 factory/candidates
 
@@ -46,14 +45,15 @@ jobs:
     - name: Pytest import check
       run: pytest -q tests
 
-    # 5 ▸ free disk, then pull the **foundation-python** image
+    # 5 ▸ clear Docker cache to free disk
     - name: Prune docker cache
       run: docker system prune -af
 
-    - name: Run Lean back-tests (foundation-python ≈ 3 GB)
+    # 6 ▸ back-test survivors in the **foundation-cpu** image
+    - name: Run Lean back-tests (foundation-cpu ≈3 GB)
       if: success()
       env:
-        LEAN_DOCKER_IMAGE: quantconnect/lean:foundation-python
+        LEAN_DOCKER_IMAGE: quantconnect/lean:foundation-cpu
       run: |
         mkdir backtest_reports
         for dir in factory/candidates/ALG_*; do
@@ -67,7 +67,7 @@ jobs:
               --output ../../../backtest_reports/$(basename $dir).json
         done
 
-    # 6 ▸ upload artifacts
+    # 7 ▸ upload results
     - name: Upload cleaned candidates
       if: success()
       uses: actions/upload-artifact@v4
