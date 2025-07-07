@@ -1,9 +1,9 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:          # manual button in Actions tab
+  workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'       # optional daily run at 06:00 UTC
+    - cron: '0 6 * * *'   # optional daily run
 
 jobs:
   factory:
@@ -11,36 +11,27 @@ jobs:
     timeout-minutes: 60
 
     steps:
-    #################################################################
-    # 1 ▸ Checkout repo
-    #################################################################
-    - name: Checkout repo
-      uses: actions/checkout@v4
+    # 1 ▸ checkout
+    - uses: actions/checkout@v4
+      name: Checkout repo
 
-    #################################################################
-    # 2 ▸ Python 3.11 + requirements
-    #################################################################
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+    # 2 ▸ Python 3.11
+    - uses: actions/setup-python@v4
+      name: Set up Python
+      with: { python-version: '3.11' }
 
     - name: Install requirements
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install --upgrade lean                 # ← new: install Lean CLI
 
-    #################################################################
-    # 3 ▸ GPT generates candidate strategies
-    #################################################################
+    # 3 ▸ GPT generation
     - name: Generate candidates
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      env: { OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} }
       run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    #################################################################
-    # 4 ▸ Static gate  (Ruff → AST → Pytest)
-    #################################################################
+    # 4 ▸ static gate
     - name: Ruff lint
       run: ruff check --ignore F403,F405,F841 factory/candidates
 
@@ -53,53 +44,35 @@ jobs:
     - name: Pytest import check
       run: pytest -q tests
 
-    #################################################################
-    # 5 ▸ Free disk space, then prune Docker cache
-    #################################################################
+    # 5 ▸ free disk for Docker image (optional but safe)
     - name: Free runner disk
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
         sudo docker system prune -af
 
-    #################################################################
-    # 6 ▸ Back-test each survivor with the Lean engine
-    #################################################################
-    - name: Run Lean back-tests (foundation image)
+    # 6 ▸ back-test each survivor via Lean CLI
+    - name: Run Lean back-tests
       if: success()
-      env:
-        LEAN_IMAGE: quantconnect/lean:foundation           # <— official CPU image
       run: |
-        mkdir -p backtest_reports
-        # Loop over each generated strategy folder
+        mkdir backtest_reports
         for dir in factory/candidates/ALG_*; do
-          STRAT=$(basename "$dir")
-          echo "── Back-testing $STRAT ──"
-
-          docker run --rm \
-            -v "${{ github.workspace }}/$dir":/Lean/Launcher \
-            ${LEAN_IMAGE} \
-            dotnet /Lean/Launcher/QuantConnect.Lean.Launcher.dll \
-              --data-folder /Lean/Data \
-              --algorithm-type-name main \
-              --algorithm-location /Lean/Launcher/main.py \
-              --start-date 2021-01-01 \
-              --end-date   2023-12-31 \
-              --results-destination /Lean/Launcher/../../backtest_reports
+          echo "── Back-testing $(basename $dir) ──"
+          lean backtest "$dir" \
+            --detach \
+            --engine-image quantconnect/lean:latest \
+            --start 2021-01-01 --end 2023-12-31 \
+            --output-dir backtest_reports/$(basename $dir)
         done
 
-    #################################################################
-    # 7 ▸ Upload artifacts
-    #################################################################
-    - name: Upload cleaned candidates
+    # 7 ▸ upload artifacts
+    - uses: actions/upload-artifact@v4
       if: success()
-      uses: actions/upload-artifact@v4
       with:
         name: candidates_clean
         path: factory/candidates
 
-    - name: Upload back-test reports
+    - uses: actions/upload-artifact@v4
       if: success()
-      uses: actions/upload-artifact@v4
       with:
         name: backtest_reports
         path: backtest_reports
