@@ -11,15 +11,11 @@ jobs:
     timeout-minutes: 60
 
     steps:
-    # --------------------------------------------------------------
-    # 1 ▸ checkout code
-    # --------------------------------------------------------------
+    # 1 ▸ checkout
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    # --------------------------------------------------------------
-    # 2 ▸ Python environment
-    # --------------------------------------------------------------
+    # 2 ▸ Python deps
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
@@ -30,18 +26,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # --------------------------------------------------------------
-    # 3 ▸ GPT creates candidate strategies
-    # --------------------------------------------------------------
+    # 3 ▸ GPT generation
     - name: Generate candidates
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
         python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    # --------------------------------------------------------------
     # 4 ▸ Static gate
-    # --------------------------------------------------------------
     - name: Ruff lint
       run: |
         ruff check --ignore F403,F405,F841 factory/candidates
@@ -56,17 +48,15 @@ jobs:
       run: |
         pytest -q tests
 
-    # --------------------------------------------------------------
-    # 5 ▸ Free disk *then* pull the **small** Lean image
-    # --------------------------------------------------------------
+    # 5 ▸ Make room, then pull the small image
     - name: Prune docker space
       run: |
         docker system prune -af
 
-    - name: Run Lean back-tests (engine image ~3 GB)
+    - name: Run Lean back-tests (python image ≈3 GB)
       if: success()
       env:
-        LEAN_DOCKER_IMAGE: quantconnect/lean:engine
+        LEAN_DOCKER_IMAGE: quantconnect/lean:python
       run: |
         mkdir backtest_reports
         for dir in factory/candidates/ALG_*; do
@@ -80,9 +70,7 @@ jobs:
               --output ../../../backtest_reports/$(basename $dir).json
         done
 
-    # --------------------------------------------------------------
     # 6 ▸ Upload artifacts
-    # --------------------------------------------------------------
     - name: Upload cleaned candidates
       if: success()
       uses: actions/upload-artifact@v4
