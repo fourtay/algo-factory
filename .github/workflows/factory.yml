@@ -3,7 +3,7 @@ name: Strategy Factory – Generate & Back-test
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'       # optional daily run
+    - cron: '0 6 * * *'        # optional daily run
 
 jobs:
   factory:
@@ -11,24 +11,29 @@ jobs:
     timeout-minutes: 60
 
     steps:
-    # 1 ▸ Checkout repo
-    - uses: actions/checkout@v4
+    # 1 ▸ check out the repo
+    - name: Checkout repo
+      uses: actions/checkout@v4
 
-    # 2 ▸ Python + deps
-    - uses: actions/setup-python@v4
-      with: {python-version: '3.11'}
+    # 2 ▸ Python 3.11 + dependencies
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
     - name: Install requirements
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 3 ▸ GPT generation
+    # 3 ▸ generate candidate algos with GPT
     - name: Generate candidates
-      env: {OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}}
-      run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    # 4 ▸ Static gate
+    # 4 ▸ static gate: Ruff → AST → Pytest
     - name: Ruff lint
       run: ruff check --ignore F403,F405,F841 factory/candidates
 
@@ -41,11 +46,11 @@ jobs:
     - name: Pytest import check
       run: pytest -q tests
 
-    # 5 ▸ Free disk, then pull ***foundation-python*** image
+    # 5 ▸ free disk, then pull the **foundation-python** image
     - name: Prune docker cache
       run: docker system prune -af
 
-    - name: Run Lean back-tests (foundation-python ≈3 GB)
+    - name: Run Lean back-tests (foundation-python ≈ 3 GB)
       if: success()
       env:
         LEAN_DOCKER_IMAGE: quantconnect/lean:foundation-python
@@ -62,15 +67,17 @@ jobs:
               --output ../../../backtest_reports/$(basename $dir).json
         done
 
-    # 6 ▸ Upload artifacts
-    - uses: actions/upload-artifact@v4
+    # 6 ▸ upload artifacts
+    - name: Upload cleaned candidates
       if: success()
+      uses: actions/upload-artifact@v4
       with:
         name: candidates_clean
         path: factory/candidates
 
-    - uses: actions/upload-artifact@v4
+    - name: Upload back-test reports
       if: success()
+      uses: actions/upload-artifact@v4
       with:
         name: backtest_reports
         path: backtest_reports
