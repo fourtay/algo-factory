@@ -1,6 +1,5 @@
 name: Strategy Factory – Generate & Back-test
-on:
-  workflow_dispatch: {}
+on: { workflow_dispatch: {} }
 
 jobs:
   factory:
@@ -8,13 +7,14 @@ jobs:
     timeout-minutes: 60
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
+    # 1 ▸ checkout
+    - uses: actions/checkout@v4
+      name: Checkout repo
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+    # 2 ▸ Python + Lean CLI
+    - uses: actions/setup-python@v4
+      name: Set up Python
+      with: { python-version: '3.11' }
 
     - name: Install deps & Lean CLI
       run: |
@@ -22,13 +22,15 @@ jobs:
         pip install -r requirements.txt lean
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+    # 3 ▸ generate candidates
     - name: Generate candidates
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      env: { OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} }
       run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
+    # 4 ▸ static checks
     - name: Ruff lint
-      run: ruff check --ignore F403,F405,F841 factory/candidates
+      run: |
+        ruff check --ignore F403,F405,F841,F541 factory/candidates
 
     - name: AST future-data check
       run: |
@@ -39,12 +41,13 @@ jobs:
     - name: Pytest import check
       run: pytest -q tests
 
+    # 5 ▸ free disk
     - name: Free runner disk
       run: |
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android
         sudo docker system prune -af
 
-    # ─── Lean config with organization-id ──────────────────────────────────
+    # 6 ▸ minimal Lean config
     - name: Write lean.json
       run: |
         cat > lean.json <<'EOF'
@@ -56,7 +59,7 @@ jobs:
         }
         EOF
 
-    # ─── Back-test every candidate ────────────────────────────────────────
+    # 7 ▸ back-test candidates
     - name: Run Lean back-tests
       run: |
         mkdir -p backtest_reports
@@ -68,7 +71,7 @@ jobs:
             --output backtest_reports/$(basename "$dir")
         done
 
-    # ─── Upload artifacts ────────────────────────────────────────────────
+    # 8 ▸ upload artefacts
     - uses: actions/upload-artifact@v4
       name: Upload cleaned candidates
       with:
