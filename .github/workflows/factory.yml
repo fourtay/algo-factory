@@ -1,88 +1,86 @@
 name: Strategy Factory – Generate & Back-test
+
 on:
-  workflow_dispatch:           # run manually from Actions-tab
+  workflow_dispatch:          # run manually from Actions tab
 
 jobs:
   factory:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
-    # —─────────────────────────── 1. CHECKOUT ──────────────────────────────
-    - name: Checkout repo
-      uses: actions/checkout@v4
+      # 1 ▸ checkout repo
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    # —─────────────────────────── 2. PYTHON LAYER ──────────────────────────
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      # 2 ▸ Python 3.11 + Lean CLI
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with: { python-version: '3.11' }
 
-    - name: Install deps
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        # Lean CLI + stubs for local back-tests
-        pip install lean quantconnect-stubs
+      - name: Install deps & Lean CLI
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install --upgrade lean
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"   # make wrapper visible
 
-    # —─────────────────────────── 3. CANDIDATE GEN ─────────────────────────
-    - name: Generate candidates
-      run: |
-        python factory/scripts/generate_algo.py --task "simple RSI strategy"
+      # 3 ▸ generate candidates with GPT
+      - name: Generate candidates
+        env: { OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} }
+        run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
-    - name: Ruff lint
-      run: |
-        ruff check --ignore F403,F405,F841 factory/candidates
+      # 4 ▸ static checks
+      - name: Ruff lint
+        run: ruff check --ignore F403,F405,F841 factory/candidates
 
-    - name: AST future-data check
-      run: |
-        python factory/scripts/check_future_data.py
+      - name: AST future-data check
+        run: |
+          for f in factory/candidates/ALG_*/main.py; do
+            python factory/scripts/check_ast.py "$f"
+          done
 
-    - name: Pytest import check
-      run: |
-        pytest -q tests                       # compile-only; no execution
+      - name: Pytest import check
+        run: pytest -q tests
 
-    # —─────────────────────────── 4. FREE-UP DISK (GitHub runner limit) ────
-    - name: Free runner disk
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android
+      # 5 ▸ free disk so Docker image fits
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android
+          sudo docker system prune -af
 
-    # —─────────────────────────── 5. MINIMAL LEAN CONFIG ───────────────────
-    # Instead of `lean init --ci`, we just drop a tiny lean.json so CLI is happy
-    - name: Create lean.json (CI)
-      run: |
-        cat > lean.json <<'EOF'
-        {
-          "version": "2.0.0",
-          "data-folder": "data",
-          "lean-engine": {
-            "image": "quantconnect/lean:latest"
+      # 6 ▸ create minimal lean.json (replaces lean init)
+      - name: Write lean.json
+        run: |
+          cat > lean.json <<'EOF'
+          {
+            "version": "2.0.0",
+            "data-folder": "data",
+            "lean-engine": { "image": "quantconnect/lean:latest" }
           }
-        }
-        EOF
+          EOF
 
-    # —─────────────────────────── 6. BACK-TEST LOOP ────────────────────────
-    - name: Run Lean back-tests
-      run: |
-        mkdir -p backtest_reports
-        for dir in factory/candidates/ALG_*; do
-          echo "── Back-testing $(basename "$dir") ──"
-          lean backtest "$dir" \
+      # 7 ▸ run back-tests via Lean CLI
+      - name: Run Lean back-tests
+        run: |
+          mkdir -p backtest_reports
+          for dir in factory/candidates/ALG_*; do
+            echo "── Back-testing $(basename "$dir") ──"
+            lean backtest "$dir" \
               --detach \
               --image quantconnect/lean:latest \
-              --start 2021-01-01 --end 2023-12-31 \
               --output backtest_reports/$(basename "$dir")
-        done
+          done
 
-    # —─────────────────────────── 7. PUBLISH ARTEFACTS ─────────────────────
-    - name: Upload cleaned candidates
-      uses: actions/upload-artifact@v4
-      with:
-        name: surviving_algorithms
-        path: factory/candidates
+      # 8 ▸ upload artefacts
+      - name: Upload surviving candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidates_clean
+          path: factory/candidates
 
-    - name: Upload back-test reports
-      uses: actions/upload-artifact@v4
-      with:
-        name: backtest_reports
-        path: backtest_reports
+      - name: Upload back-test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest_reports
+          path: backtest_reports
