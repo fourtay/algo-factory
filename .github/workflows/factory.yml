@@ -1,7 +1,7 @@
 name: Strategy Factory – Generate & Back-test
 
 on:
-  workflow_dispatch:          # run manually from Actions tab
+  workflow_dispatch:
 
 jobs:
   factory:
@@ -9,25 +9,26 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # 1 ▸ checkout repo
+      # 1 ▸ checkout
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2 ▸ Python 3.11 + Lean CLI
+      # 2 ▸ Python + Lean CLI
       - name: Set up Python
         uses: actions/setup-python@v4
-        with: { python-version: '3.11' }
+        with:
+          python-version: '3.11'
 
-      - name: Install deps & Lean CLI
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install --upgrade lean
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"   # make wrapper visible
+          pip install -r requirements.txt lean
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # 3 ▸ generate candidates with GPT
+      # 3 ▸ generate candidates
       - name: Generate candidates
-        env: { OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} }
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python factory/scripts/generate_algo.py --task "simple RSI strategy"
 
       # 4 ▸ static checks
@@ -43,13 +44,13 @@ jobs:
       - name: Pytest import check
         run: pytest -q tests
 
-      # 5 ▸ free disk so Docker image fits
+      # 5 ▸ free some disk
       - name: Free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
           sudo docker system prune -af
 
-      # 6 ▸ create minimal lean.json (replaces lean init)
+      # 6 ▸ minimal Lean config (skip lean init)
       - name: Write lean.json
         run: |
           cat > lean.json <<'EOF'
@@ -60,7 +61,7 @@ jobs:
           }
           EOF
 
-      # 7 ▸ run back-tests via Lean CLI
+      # 7 ▸ back-test each candidate
       - name: Run Lean back-tests
         run: |
           mkdir -p backtest_reports
@@ -73,7 +74,7 @@ jobs:
           done
 
       # 8 ▸ upload artefacts
-      - name: Upload surviving candidates
+      - name: Upload cleaned candidates
         uses: actions/upload-artifact@v4
         with:
           name: candidates_clean
